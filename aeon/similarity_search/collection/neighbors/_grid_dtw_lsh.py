@@ -1,34 +1,46 @@
-"""."""
+""".
+
+Example code :
+
+from aeon.datasets import load_classification
+
+X_train, y_train = load_classification("GunPoint", split="train")
+X_test, y_test = load_classification("GunPoint", split="test")
+g = GridIndexANN([0.33], 3, normalize=False, n_jobs=-1, random_state=42).fit(
+    X_train, y_train
+)
+
+"""
 
 import numpy as np
 from numba import get_num_threads, njit, set_num_threads
 
 from aeon.similarity_search.collection._base import BaseCollectionSimilaritySearch
+from aeon.utils.numba.general import (
+    get_all_subsequences,
+    normalise_subsequences,
+    sliding_mean_std_one_series,
+)
 
 
 @njit(cache=True, fastmath=True)
-def _series_to_grid_coord(X, delta, normalize):
+def _series_to_grid_coord(X, delta):
     """Series to grid coordinates."""
     n_channels, n_timepoints = X.shape
+    X_seq = (X // delta).astype(np.int32)
     X_hash = ""
     for i in range(n_channels):
-        seq = np.zeros(n_timepoints, dtype=np.int64)
-        for j in range(0, n_timepoints):
-            seq[j] = np.int64(X[i, j] // delta)
-        if normalize:
-            seq -= np.min(seq)
         X_hash += "|"
-        last_hash = ""
+        last_val = np.inf
         for j in range(0, n_timepoints):
-            x_val = str(seq[j])
-            if x_val != last_hash:
-                X_hash += x_val
-                last_hash = x_val
+            if X_seq[i, j] != last_val:
+                last_val = X_seq[i, j]
+                X_hash += str(X_seq[i, j])
     return X_hash
 
 
 @njit(cache=True)
-def _hash_series(X, delta, T, K, normalize):
+def _hash_series(X, delta, T, K):
     n_ts = X.shape[1]
     step = np.int64(n_ts // K)
     rems = np.zeros(K, dtype=np.int64)
@@ -36,7 +48,7 @@ def _hash_series(X, delta, T, K, normalize):
     return "*".join(
         [
             _series_to_grid_coord(
-                X[:, i * step : rems[i] + (i + 1) * step], delta + T[i], normalize
+                X[:, i * step : rems[i] + (i + 1) * step], delta + T[i]
             )
             for i in range(K)
         ]
@@ -58,24 +70,32 @@ def _collection_index_dict(
     index = {}
     for i in range(len(X)):
         for length in L:
-            _stride = max(2, int(length * stride))
-            for j in range(0, X[i].shape[1] - length + 1, _stride):
-                sub = X[i][:, j : j + length]
-                key = "$".join(
-                    [
-                        _hash_series(
-                            sub,
-                            deltas[i_hash],
-                            hashes_grid_shift[i_hash],
-                            K,
-                            normalize,
-                        )
-                        for i_hash in range(n_hashes)
-                    ]
-                )
-                if key not in index:
-                    index[key] = []
-                index[key].append([i, j, length])
+            for dilation in range(1, np.floor_divide(X[i].shape[1], length)):
+                _stride = max(2, int(length * stride))
+                # TODO stride but include last one
+                X_subs = get_all_subsequences(X[i], length, dilation)[::_stride]
+                if normalize:
+                    X_means, X_stds = sliding_mean_std_one_series(
+                        X[i], length, dilation
+                    )
+                    X_subs = normalise_subsequences(
+                        X_subs, X_means[::_stride], X_stds[::_stride]
+                    )
+                for j in range(len(X_subs)):
+                    key = "$".join(
+                        [
+                            _hash_series(
+                                X_subs[j],
+                                deltas[i_hash],
+                                hashes_grid_shift[i_hash],
+                                K,
+                            )
+                            for i_hash in range(n_hashes)
+                        ]
+                    )
+                    if key not in index:
+                        index[key] = []
+                    index[key].append([i, j, length, dilation])
     for key in index:
         index[key] = np.asarray(index[key])
     return index

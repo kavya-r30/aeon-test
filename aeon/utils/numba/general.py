@@ -453,7 +453,7 @@ def get_subsequence(
         The resulting subsequence.
     """
     n_channels, _ = X.shape
-    values = np.zeros((n_channels, length))
+    values = np.zeros((n_channels, length), dtype=X.dtype)
     idx = i_start
     for i_length in prange(length):
         values[:, i_length] = X[:, idx]
