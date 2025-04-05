@@ -26,7 +26,7 @@ restricted_labels = {"meta-issue"}
 
 # Assign tagged used to the issue if the comment includes the trigger phrase
 body = comment_body.lower()
-if "@aeon-actions-bot" in body and "assign" in body:
+if "@aeon-actions-bot" in body and "assign" in body and not pr:
     if issue_labels & restricted_labels:
         restricted = restricted_labels & issue_labels
         issue.create_comment(
