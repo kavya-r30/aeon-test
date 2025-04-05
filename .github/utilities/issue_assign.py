@@ -19,6 +19,7 @@ repo = g.get_repo(repo)
 issue_number = context_dict["event"]["issue"]["number"]
 issue = repo.get_issue(number=issue_number)
 comment_body = context_dict["event"]["comment"]["body"]
+pr = context_dict["event"]["issue"].get("pull_request")
 issue_labels = {label.name.lower() for label in issue.labels}
 
 restricted_labels = {"meta-issue"}
